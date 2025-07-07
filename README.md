@@ -49,6 +49,7 @@ chmod +x scan-offline.sh update-trivy-offline.sh
 |-----------|-------------|---------|
 | `scan-offline.sh` | Main scanning script | Easy command-line scanning |
 | `update-trivy-offline.sh` | Advanced update script | Comprehensive database updates |
+| `cleanup-disk.sh` | Disk cleanup utility | Manage disk space and cleanup |
 | `trivy_offline_scanner.py` | Python wrapper | Programmatic scanning |
 | `trivy-config.yaml` | Configuration file | Offline mode settings |
 | `docker-compose.yml` | Docker Compose setup | Container orchestration |
@@ -224,6 +225,54 @@ container-scanner/
 └── 📁 packages/                     # Deployment packages
 ```
 
+## 💾 Disk Management
+
+### Check Disk Usage
+
+Monitor disk space usage across all components:
+
+```bash
+# Show detailed disk usage status
+./cleanup-disk.sh --status
+
+# Quick overview
+du -sh trivy-db/ trivy-cache/ backups/ scan-results/
+```
+
+### Cleanup Options
+
+```bash
+# Clean analysis cache (safe, preserves database)
+./cleanup-disk.sh --cache
+
+# Clean old scan results
+./cleanup-disk.sh --results
+
+# Clean old backups (keeps last 3)
+./cleanup-disk.sh --backups
+
+# Clean everything except database and recent backups
+./cleanup-disk.sh --all
+
+# Preview what would be cleaned (dry run)
+./cleanup-disk.sh --dry-run --all
+
+# WARNING: Complete cleanup including database
+./cleanup-disk.sh --deep-clean
+```
+
+### Automated Cleanup
+
+Add to crontab for regular maintenance:
+
+```bash
+# Clean cache weekly
+0 2 * * 0 /path/to/cleanup-disk.sh --cache --results
+
+# Clean old backups monthly
+0 1 1 * * /path/to/cleanup-disk.sh --backups
+```
+
 ## 🔄 Database Management
 
 ### Regular Updates
@@ -331,6 +380,10 @@ ls -la *.sh
 3. **Clear old cache** periodically:
 
    ```bash
+   # Use the cleanup script
+   ./cleanup-disk.sh --cache
+   
+   # Or manually
    rm -rf trivy-cache/fanal/*
    ```
 

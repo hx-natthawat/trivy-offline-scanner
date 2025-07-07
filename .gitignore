@@ -96,6 +96,7 @@ workspace/
 !docker-compose.yml
 !scan-offline.sh
 !update-trivy-offline.sh
+!cleanup-disk.sh
 !requirements.txt
 !*.md
 
