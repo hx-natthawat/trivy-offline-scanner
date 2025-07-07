@@ -1,0 +1,229 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'DOCKER_IMAGE', defaultValue: '', description: 'Docker image to scan (e.g., nginx:latest)')
+        choice(name: 'SEVERITY_THRESHOLD', choices: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'], description: 'Minimum severity to fail the build')
+        choice(name: 'OUTPUT_FORMAT', choices: ['table', 'json', 'cyclonedx', 'spdx'], description: 'Output format for scan results')
+        booleanParam(name: 'FAIL_ON_VULNERABILITIES', defaultValue: true, description: 'Fail build if vulnerabilities found above threshold')
+    }
+    
+    environment {
+        SCANNER_PATH = "${WORKSPACE}/trivy-scanner"
+        SCAN_RESULTS_DIR = "${WORKSPACE}/scan-results"
+        TRIVY_CACHE_DIR = "/var/lib/jenkins/trivy-cache"
+        TRIVY_DB_DIR = "/var/lib/jenkins/trivy-db"
+    }
+    
+    stages {
+        stage('Prepare Scanner') {
+            steps {
+                script {
+                    // Check if scanner is already installed
+                    if (!fileExists("${SCANNER_PATH}/scan-offline.sh")) {
+                        echo "Setting up Trivy scanner..."
+                        sh '''
+                            mkdir -p ${SCANNER_PATH}
+                            cp -r /opt/trivy-offline-scanner/* ${SCANNER_PATH}/ || true
+                            chmod +x ${SCANNER_PATH}/*.sh
+                        '''
+                    }
+                    
+                    // Ensure results directory exists
+                    sh "mkdir -p ${SCAN_RESULTS_DIR}"
+                }
+            }
+        }
+        
+        stage('Validate Database') {
+            steps {
+                script {
+                    def dbExists = sh(
+                        script: "test -f ${TRIVY_DB_DIR}/trivy.db && echo 'true' || echo 'false'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (dbExists == 'false') {
+                        error("Trivy database not found at ${TRIVY_DB_DIR}. Please setup the database first.")
+                    }
+                    
+                    // Check database age
+                    def dbAge = sh(
+                        script: "find ${TRIVY_DB_DIR}/trivy.db -mtime +30 | wc -l",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (dbAge == '1') {
+                        echo "WARNING: Database is more than 30 days old. Consider updating it."
+                    }
+                }
+            }
+        }
+        
+        stage('Pull Docker Image') {
+            when {
+                expression { params.DOCKER_IMAGE != '' }
+            }
+            steps {
+                script {
+                    try {
+                        sh "docker pull ${params.DOCKER_IMAGE}"
+                    } catch (Exception e) {
+                        echo "Failed to pull image. Will try to scan local image."
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            when {
+                expression { params.DOCKER_IMAGE != '' }
+            }
+            steps {
+                script {
+                    def timestamp = new Date().format('yyyyMMdd_HHmmss')
+                    def outputFile = "${SCAN_RESULTS_DIR}/scan_${params.DOCKER_IMAGE.replace(':', '_')}_${timestamp}"
+                    
+                    // Set severity levels based on threshold
+                    def severityLevels = []
+                    switch(params.SEVERITY_THRESHOLD) {
+                        case 'LOW':
+                            severityLevels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+                            break
+                        case 'MEDIUM':
+                            severityLevels = ['CRITICAL', 'HIGH', 'MEDIUM']
+                            break
+                        case 'HIGH':
+                            severityLevels = ['CRITICAL', 'HIGH']
+                            break
+                        case 'CRITICAL':
+                            severityLevels = ['CRITICAL']
+                            break
+                    }
+                    
+                    def severityString = severityLevels.join(',')
+                    
+                    // Prepare environment
+                    sh """
+                        # Ensure cache directory exists and copy DB if needed
+                        mkdir -p ${TRIVY_CACHE_DIR}/db
+                        if [ ! -f ${TRIVY_CACHE_DIR}/db/trivy.db ]; then
+                            cp ${TRIVY_DB_DIR}/* ${TRIVY_CACHE_DIR}/db/ || true
+                        fi
+                    """
+                    
+                    // Run scan
+                    def scanExitCode = sh(
+                        script: """
+                            docker run --rm \
+                                -v /var/run/docker.sock:/var/run/docker.sock:ro \
+                                -v ${TRIVY_CACHE_DIR}:/root/.cache/trivy \
+                                -v ${SCAN_RESULTS_DIR}:/results \
+                                -e TRIVY_CACHE_DIR=/root/.cache/trivy \
+                                -e TRIVY_SKIP_DB_UPDATE=true \
+                                -e TRIVY_SKIP_JAVA_DB_UPDATE=true \
+                                aquasec/trivy:latest \
+                                image \
+                                --format ${params.OUTPUT_FORMAT} \
+                                --severity ${severityString} \
+                                --output /results/\$(basename ${outputFile}.${params.OUTPUT_FORMAT}) \
+                                ${params.DOCKER_IMAGE}
+                        """,
+                        returnStatus: true
+                    )
+                    
+                    // Archive results
+                    archiveArtifacts artifacts: "scan-results/*", allowEmptyArchive: true
+                    
+                    // Process results based on format
+                    if (params.OUTPUT_FORMAT == 'json') {
+                        def scanResults = readJSON file: "${outputFile}.json"
+                        analyzeScanResults(scanResults, severityLevels)
+                    }
+                    
+                    // Fail build if vulnerabilities found and option is enabled
+                    if (params.FAIL_ON_VULNERABILITIES && scanExitCode != 0) {
+                        error("Security vulnerabilities found above ${params.SEVERITY_THRESHOLD} threshold!")
+                    }
+                }
+            }
+        }
+        
+        stage('Generate Report') {
+            when {
+                expression { params.DOCKER_IMAGE != '' }
+            }
+            steps {
+                script {
+                    // Generate HTML report if JSON format was used
+                    if (params.OUTPUT_FORMAT == 'json') {
+                        generateHTMLReport()
+                    }
+                    
+                    // Publish reports
+                    publishHTML([
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: "${SCAN_RESULTS_DIR}",
+                        reportFiles: '*.html',
+                        reportName: 'Trivy Security Scan Report'
+                    ])
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                // Clean workspace but keep scanner and cache
+                sh """
+                    find ${SCAN_RESULTS_DIR} -type f -mtime +7 -delete || true
+                """
+            }
+        }
+        success {
+            echo "Security scan completed successfully!"
+        }
+        failure {
+            echo "Security scan failed or found vulnerabilities!"
+            // Send notifications if configured
+            // emailext, slack, etc.
+        }
+    }
+}
+
+def analyzeScanResults(scanResults, severityLevels) {
+    def totalVulns = 0
+    def vulnsBySeverity = [:]
+    
+    scanResults.Results?.each { result ->
+        result.Vulnerabilities?.each { vuln ->
+            if (severityLevels.contains(vuln.Severity)) {
+                totalVulns++
+                vulnsBySeverity[vuln.Severity] = (vulnsBySeverity[vuln.Severity] ?: 0) + 1
+            }
+        }
+    }
+    
+    echo "=== Security Scan Summary ==="
+    echo "Total vulnerabilities: ${totalVulns}"
+    vulnsBySeverity.each { severity, count ->
+        echo "${severity}: ${count}"
+    }
+    echo "=========================="
+    
+    // Add to build description
+    currentBuild.description = "Vulnerabilities: ${totalVulns} " +
+        "(C:${vulnsBySeverity.CRITICAL ?: 0}, " +
+        "H:${vulnsBySeverity.HIGH ?: 0}, " +
+        "M:${vulnsBySeverity.MEDIUM ?: 0}, " +
+        "L:${vulnsBySeverity.LOW ?: 0})"
+}
+
+def generateHTMLReport() {
+    // This would generate a nice HTML report from JSON results
+    echo "Generating HTML report..."
+    // Implementation depends on your needs
+}

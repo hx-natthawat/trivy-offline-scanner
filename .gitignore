@@ -1,0 +1,103 @@
+# Trivy Database and Cache
+trivy-db/
+trivy-cache/
+*.db
+*.db-journal
+
+# Scan Results
+scan-results/
+*.json
+*.xml
+*.sarif
+*.spdx
+*.cyclonedx
+
+# Backup directories
+backups/
+backup/
+*.backup
+*.bak
+
+# Package files
+packages/
+*.tar.gz
+*.tar
+*.zip
+*.tgz
+
+# Log files
+*.log
+logs/
+*.out
+*.err
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+.tmp*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Security files (never commit these)
+*.key
+*.pem
+*.crt
+*.cert
+secrets/
+credentials/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Lock files (keep these for reproducibility)
+# package-lock.json
+# yarn.lock
+# Pipfile.lock
+
+# Jenkins workspace (if running locally)
+.jenkins/
+workspace/
+
+# Checksum files (optional - uncomment if you don't want to track)
+# *.sha256
+# *.md5
+
+# Keep specific files
+!trivy-config.yaml
+!docker-compose.yml
+!scan-offline.sh
+!update-trivy-offline.sh
+!requirements.txt
+!*.md
+
+# AI
+.claude

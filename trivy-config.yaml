@@ -1,0 +1,53 @@
+# Trivy Configuration for Offline Scanning
+
+# Database settings
+db:
+  # Skip database update (required for offline mode)
+  skip-update: true
+  # Local database repository path
+  repository: "file:///trivy-db"
+  
+# Cache settings  
+cache:
+  # Cache directory
+  dir: "/root/.cache/trivy"
+  # Cache backend (fs = filesystem)
+  backend: "fs"
+
+# Scan settings
+scan:
+  # Security checks to perform
+  security-checks:
+    - vuln
+    - config
+  
+  # Vulnerability settings
+  vuln-type:
+    - os
+    - library
+  
+  # Severity levels to report
+  severity:
+    - CRITICAL
+    - HIGH
+    - MEDIUM
+    - LOW
+    - UNKNOWN
+    
+# Report settings
+report:
+  # Default output format
+  format: table
+  # Exit code when vulnerabilities are found
+  exit-code: 1
+  # Exit on End of Life OS
+  exit-on-eol: true
+
+# Timeout settings
+timeout: 5m
+
+# Quiet mode (suppress progress bar)
+quiet: false
+
+# Debug mode
+debug: false

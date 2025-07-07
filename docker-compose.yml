@@ -1,0 +1,13 @@
+services:
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: trivy-scanner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./trivy-cache:/root/.cache/trivy
+      - ./scan-results:/scan-results
+    environment:
+      - TRIVY_CACHE_DIR=/root/.cache/trivy
+      - TRIVY_SKIP_DB_UPDATE=true
+      - TRIVY_SKIP_JAVA_DB_UPDATE=true
+    command: --help
